@@ -22,14 +22,16 @@ Fuer Desktop-App/SDK-Sitzungen alternativ `CLAUDE_CODE_PLUGIN_DIRS` im `env`-Blo
 
 Zeigt den Token-Verbrauch der letzten 7 Tage im Vergleich zur Plan-Auslastung.
 
-- `/tokens` oeffnet ein Pane: Balken je Tag, Summe (ohne/mit Cache-Reads), Aufteilung
+- Leiste oberhalb der Eingabe: Verlauf der 7 Tage als Sparkline, Summe, Plan 5h/7T in Prozent
+  (gruen/gelb/rot ab 70/90 %), Reset-Zeitpunkt und Tokens je 1 % Plan. Knopf „Details“.
+- „Details“ bzw. `/tokens` oeffnet ein Pane: Balken je Tag, Summe (ohne/mit Cache-Reads), Aufteilung
   Input/Output/Cache, Verbrauch je Modell.
 - Plan-Auslastung: 5-Stunden- und 7-Tage-Fenster in Prozent mit Reset-Zeitpunkt, so wie die
   letzte API-Antwort sie meldet (nur mit Abo-Login, nicht mit API-Key). Der letzte Stand wird
   sitzungsuebergreifend gespeichert.
 - Vergleich: Tokens seit Beginn des aktuellen 7-Tage-Plan-Fensters gegen dessen Prozentwert,
   daraus Tokens je 1 % und eine Hochrechnung bis 100 %.
-- Statuszeile: `7T: <Tokens> Tok · Plan 7T <n>%`, alle 10 Minuten neu eingelesen.
+- Transkripte werden beim Start und alle 10 Minuten neu eingelesen.
 
 Grenzen:
 
