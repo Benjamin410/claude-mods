@@ -12,6 +12,7 @@ import {
   projectCapacity,
   type UsageRecord,
 } from './aggregate'
+import { fmtUsd } from './pricing'
 
 const PANE = 'token-usage'
 const TITLE = 'Token-Verbrauch (7 Tage)'
@@ -65,10 +66,41 @@ function planSince(snapshot: PlanSnapshot | null): number | undefined {
   return Number.isFinite(reset) ? reset - 7 * DAY_MS : undefined
 }
 
+type RateLimit = { kind: string; percentUsed: number; resetsAt?: string }
+
+const samePlan = (a: PlanSnapshot | null, windows: RateLimit[]) =>
+  !!a &&
+  a.windows.length === windows.length &&
+  a.windows.every((w, i) => {
+    const o = windows[i]
+    return o && w.kind === o.kind && w.percentUsed === o.percentUsed && w.resetsAt === o.resetsAt
+  })
+
+/** Uebernimmt einen Plan-Stand; speichert nur bei Aenderung. */
+async function setPlan($: EngineInterface, limits: RateLimit[]): Promise<boolean> {
+  if (limits.length === 0) return false
+  const previous = await read($, plan)
+  if (samePlan(previous, limits)) return false
+  const snapshot: PlanSnapshot = {
+    measuredAt: await $.clock.now(),
+    windows: limits.map(w => ({ kind: w.kind, percentUsed: w.percentUsed, resetsAt: w.resetsAt })),
+  }
+  await update($, plan, () => snapshot)
+  await $.store.set(STORE_PLAN, snapshot).catch(() => undefined)
+  return planSince(snapshot) !== planSince(previous)
+}
+
+/** Holt den Plan-Stand, den die Sitzung schon kennt (z.B. nach /reload-plugins). */
+async function refreshPlan($: EngineInterface) {
+  const usage = await $.session.usage().catch(() => undefined)
+  if (usage) await setPlan($, usage.rateLimits)
+}
+
 async function scan($: EngineInterface): Promise<UsageReport | undefined> {
   if (await read($, scanning)) return undefined
   await update($, scanning, () => true)
   try {
+    await refreshPlan($)
     const now = await $.clock.now()
     const root = await configDir($)
     if (!root) return undefined
@@ -107,10 +139,22 @@ const when = (iso?: string) => {
   return `Reset ${pad(d.getDate())}.${pad(d.getMonth() + 1)}. ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-const bar = (value: number, max: number, width: number) => {
-  const n = max > 0 ? Math.round((value / max) * width) : 0
-  return '█'.repeat(n) + '·'.repeat(Math.max(0, width - n))
+/** Gefuellter und leerer Teil eines Balkens, getrennt faerbbar. */
+const bar = (value: number, max: number, width: number): [string, string] => {
+  const n = max > 0 ? Math.min(width, Math.round((value / max) * width)) : 0
+  return ['█'.repeat(n), '·'.repeat(Math.max(0, width - n))]
 }
+
+const tone = (pct: number) => (pct >= 90 ? 'red' : pct >= 70 ? 'yellow' : 'green')
+
+const modelColor = (model: string) =>
+  model.includes('opus') || model.includes('fable')
+    ? 'magenta'
+    : model.includes('sonnet')
+      ? 'blue'
+      : model.includes('haiku')
+        ? 'green'
+        : undefined
 
 const SPARK = '▁▂▃▄▅▆▇█'
 const spark = (values: number[]) => {
@@ -145,23 +189,10 @@ export const register: Register = on => {
     return { text: 'Token-Pane geoeffnet.' }
   })
 
-  // Plan-Auslastung kommt mit jeder API-Antwort; nur bei Aenderung speichern.
+  // Plan-Auslastung kommt mit jeder API-Antwort.
   on('session.measure', async ($, e, next) => {
-    if (e.changed.includes('rateLimits') && e.rateLimits.length > 0) {
-      const snapshot: PlanSnapshot = {
-        measuredAt: await $.clock.now(),
-        windows: e.rateLimits.map(w => ({
-          kind: w.kind,
-          percentUsed: w.percentUsed,
-          resetsAt: w.resetsAt,
-        })),
-      }
-      const previous = planSince(await read($, plan))
-      await update($, plan, () => snapshot)
-      await $.store.set(STORE_PLAN, snapshot)
-      // Neues Plan-Fenster: Summe seit Fensterbeginn neu rechnen.
-      if (planSince(snapshot) !== previous) void scan($)
-    }
+    // Neues Plan-Fenster: Summe seit Fensterbeginn neu rechnen.
+    if (await setPlan($, e.rateLimits)) void scan($)
     return next(e)
   })
 
@@ -181,13 +212,14 @@ export const register: Register = on => {
       week && windowTokens !== undefined && week.percentUsed >= 1
         ? windowTokens / week.percentUsed
         : undefined
-    const tone = (pct: number) => (pct >= 90 ? 'red' : pct >= 70 ? 'yellow' : 'green')
 
     return (
       <Box>
         <Text dimColor>Tokens 7T </Text>
         {cols >= 70 && <Text color="cyan">{`${spark(r.days.map(effective))} `}</Text>}
         <Text bold>{fmt(total)}</Text>
+        <Text dimColor> │ API </Text>
+        <Text bold color="magenta">{`≈${fmtUsd(r.total.cost)}`}</Text>
         {p ? (
           <Text>
             <Text dimColor> │ Plan </Text>
@@ -225,51 +257,77 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="column">
-        <Text bold>Letzte 7 Tage (dieses Geraet)</Text>
-        {r.days.map(d => (
-          <Text>
-            {weekday(d.day)} {d.day.slice(8)}.{d.day.slice(5, 7)}. {bar(effective(d), max, width)}{' '}
-            {fmt(effective(d)).padStart(8)}
-          </Text>
-        ))}
+        <Text bold color="cyan">Letzte 7 Tage (dieses Geraet)</Text>
+        {r.days.map((d, i) => {
+          const [full, rest] = bar(effective(d), max, width)
+          const isToday = i === r.days.length - 1
+          return (
+            <Text>
+              <Text bold={isToday} dimColor={!isToday}>
+                {weekday(d.day)} {d.day.slice(8)}.{d.day.slice(5, 7)}.
+              </Text>{' '}
+              <Text color={effective(d) === max && max > 0 ? 'yellow' : 'cyan'}>{full}</Text>
+              <Text dimColor>{rest}</Text> <Text bold={isToday}>{fmt(effective(d)).padStart(8)}</Text>{' '}
+              <Text color="magenta">{fmtUsd(d.cost).padStart(9)}</Text>
+            </Text>
+          )
+        })}
         <Text> </Text>
         <Text>
-          Summe: <Text bold>{fmt(effective(r.total))}</Text> Tokens ohne Cache-Reads,{' '}
+          Summe: <Text bold color="cyan">{fmt(effective(r.total))}</Text> Tokens ohne Cache-Reads,{' '}
           {fmt(all(r.total))} gesamt, {r.total.requests} Anfragen
         </Text>
         <Text dimColor>{split(r.total)}</Text>
+        <Text>
+          API-Preis: <Text bold color="magenta">≈ {fmtUsd(r.total.cost)}</Text> nach Listenpreis (inkl. Cache)
+          {r.total.unpriced > 0 && (
+            <Text color="yellow">{` · ${r.total.unpriced} Anfragen ohne bekannten Preis`}</Text>
+          )}
+        </Text>
         <Text> </Text>
-        <Text bold>Nach Modell</Text>
+        <Text bold color="cyan">Nach Modell</Text>
         {r.models.length === 0 && <Text dimColor>keine Anfragen</Text>}
         {r.models.map(m => (
           <Text>
-            {m.model}: {fmt(effective(m))} ({m.requests} Anfragen)
+            <Text bold color={modelColor(m.model)}>{m.model}</Text> {fmt(effective(m))} ·{' '}
+            {m.unpriced === m.requests ? (
+              <Text color="yellow">Preis unbekannt</Text>
+            ) : (
+              <Text color="magenta">≈ {fmtUsd(m.cost)}</Text>
+            )}
+            <Text dimColor>{` · ${m.requests} Anfragen`}</Text>
           </Text>
         ))}
         <Text> </Text>
-        <Text bold>Plan-Auslastung</Text>
+        <Text bold color="cyan">Plan-Auslastung</Text>
         {!p && (
           <Text dimColor>
             Noch kein Plan-Stand: er kommt mit der naechsten Antwort (nur mit Abo-Login, nicht mit API-Key).
           </Text>
         )}
-        {p?.windows.map(w => (
-          <Text>
-            {(WINDOW_NAMES[w.kind] ?? w.kind).padEnd(24)} {bar(w.percentUsed, 100, width)}{' '}
-            {String(w.percentUsed).padStart(5)}% <Text dimColor>{when(w.resetsAt)}</Text>
-          </Text>
-        ))}
+        {p?.windows.map(w => {
+          const [full, rest] = bar(w.percentUsed, 100, width)
+          return (
+            <Text>
+              {(WINDOW_NAMES[w.kind] ?? w.kind).padEnd(24)} <Text color={tone(w.percentUsed)}>{full}</Text>
+              <Text dimColor>{rest}</Text>{' '}
+              <Text bold color={tone(w.percentUsed)}>{`${String(w.percentUsed).padStart(5)}%`}</Text>{' '}
+              <Text dimColor>{when(w.resetsAt)}</Text>
+            </Text>
+          )
+        })}
         {week && r.planWindow && windowTokens !== undefined && (
           <Box flexDirection="column">
             <Text> </Text>
             <Text>
-              Seit Fensterbeginn hier verbraucht: <Text bold>{fmt(windowTokens)}</Text> Tokens ={' '}
-              {week.percentUsed}% des Plans
+              Seit Fensterbeginn hier verbraucht: <Text bold color="cyan">{fmt(windowTokens)}</Text> Tokens ={' '}
+              <Text color={tone(week.percentUsed)}>{week.percentUsed}%</Text> des Plans · API-Preis{' '}
+              <Text color="magenta">≈ {fmtUsd(r.planWindow.cost)}</Text>
             </Text>
             {capacity !== undefined && (
               <Text>
                 ≈ {fmt(windowTokens / week.percentUsed)} Tokens je 1 % · hochgerechnet ≈{' '}
-                <Text bold>{fmt(capacity)}</Text> Tokens bis 100 %
+                <Text bold color="green">{fmt(capacity)}</Text> Tokens bis 100 %
               </Text>
             )}
             <Text dimColor>

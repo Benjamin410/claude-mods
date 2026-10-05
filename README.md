@@ -26,6 +26,9 @@ Zeigt den Token-Verbrauch der letzten 7 Tage im Vergleich zur Plan-Auslastung.
   (gruen/gelb/rot ab 70/90 %), Reset-Zeitpunkt und Tokens je 1 % Plan. Knopf „Details“.
 - „Details“ bzw. `/tokens` oeffnet ein Pane: Balken je Tag, Summe (ohne/mit Cache-Reads), Aufteilung
   Input/Output/Cache, Verbrauch je Modell.
+- API-Preis: was derselbe Verbrauch nach API-Listenpreis in USD gekostet haette (je Modell, inkl.
+  Cache-Write 5 min/1 h, Cache-Read und Fast Mode), in der Leiste als Summe der 7 Tage, im Pane je
+  Tag, je Modell und seit Beginn des Plan-Fensters. Preistabelle: `hooks/pricing.ts`.
 - Plan-Auslastung: 5-Stunden- und 7-Tage-Fenster in Prozent mit Reset-Zeitpunkt, so wie die
   letzte API-Antwort sie meldet (nur mit Abo-Login, nicht mit API-Key). Der letzte Stand wird
   sitzungsuebergreifend gespeichert.

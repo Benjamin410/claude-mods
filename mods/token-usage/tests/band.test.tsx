@@ -48,6 +48,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     }
     expect(text).toContain('Tokens 7T')
     expect(text).toContain('2.0 k')
+    expect(text).toContain('≈$0.04')
     expect(text).toContain('Plan: noch kein Stand')
 
     await $.session.measure({
@@ -72,5 +73,19 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(planText).toContain('5h 23%')
     expect(planText).toContain('7T 42%')
     expect(planText).toContain('/1%')
+
+    const pane = await $.ui.mount({
+      plugin: 'token-usage',
+      surface,
+      component: 'Pane',
+      requestId: 'token-usage',
+      props: {} as never,
+    } as never)
+    const paneText = JSON.stringify(await pane.drawn())
+    await pane.unmount()
+    expect(paneText).toContain('Nach Modell')
+    expect(paneText).toContain('claude-opus-5-5')
+    expect(paneText).toContain('7-Tage-Fenster')
+    expect(paneText).toContain('API-Preis')
   })
 }

@@ -1,4 +1,5 @@
 import type { DayTotals, TokenTotals, UsageReport } from '../types'
+import { costOf } from './pricing'
 
 export const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -8,6 +9,8 @@ export const emptyTotals = (): TokenTotals => ({
   cacheWrite: 0,
   cacheRead: 0,
   requests: 0,
+  cost: 0,
+  unpriced: 0,
 })
 
 /** Eine API-Antwort aus einer Transkriptzeile. */
@@ -19,6 +22,8 @@ export type UsageRecord = {
   output: number
   cacheWrite: number
   cacheRead: number
+  /** API-Listenpreis in USD; fehlt bei unbekanntem Modell. */
+  cost?: number
 }
 
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
@@ -45,14 +50,29 @@ export function parseTranscript(text: string): UsageRecord[] {
     if (!Number.isFinite(at)) continue
     const model = typeof msg.model === 'string' ? msg.model : 'unbekannt'
     if (model === '<synthetic>') continue
+    const input = num(usage.input_tokens)
+    const output = num(usage.output_tokens)
+    const cacheWrite = num(usage.cache_creation_input_tokens)
+    const cacheRead = num(usage.cache_read_input_tokens)
+    // Ohne TTL-Aufteilung gilt der 5-Minuten-Preis.
+    const cacheWrite1h = Math.min(cacheWrite, num(usage.cache_creation?.ephemeral_1h_input_tokens))
     out.push({
       key: `${msg.id ?? row.uuid}:${row.requestId ?? ''}`,
       at,
       model,
-      input: num(usage.input_tokens),
-      output: num(usage.output_tokens),
-      cacheWrite: num(usage.cache_creation_input_tokens),
-      cacheRead: num(usage.cache_read_input_tokens),
+      input,
+      output,
+      cacheWrite,
+      cacheRead,
+      cost: costOf({
+        model,
+        input,
+        output,
+        cacheWrite5m: cacheWrite - cacheWrite1h,
+        cacheWrite1h,
+        cacheRead,
+        isFast: usage.speed === 'fast',
+      }),
     })
   }
   return out
@@ -64,6 +84,8 @@ const add = (t: TokenTotals, r: UsageRecord) => {
   t.cacheWrite += r.cacheWrite
   t.cacheRead += r.cacheRead
   t.requests += 1
+  if (r.cost === undefined) t.unpriced += 1
+  else t.cost += r.cost
 }
 
 /** Lokales Datum als YYYY-MM-DD, verschoben um `offsetMin` (Minuten oestlich von UTC). */

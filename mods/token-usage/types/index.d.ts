@@ -5,6 +5,10 @@ export type TokenTotals = {
   cacheWrite: number
   cacheRead: number
   requests: number
+  /** API-Listenpreis in USD. */
+  cost: number
+  /** Anfragen ohne bekannten Preis (in `cost` nicht enthalten). */
+  unpriced: number
 }
 
 /** Ein Tag (lokales Datum YYYY-MM-DD) mit seinen Summen. */
