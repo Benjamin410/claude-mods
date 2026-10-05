@@ -1,0 +1,11 @@
+{
+  "name": "claude-mods",
+  "owner": { "name": "Benjamin Mueller" },
+  "plugins": [
+    {
+      "name": "token-usage",
+      "source": "./mods/token-usage",
+      "description": "Token-Verbrauch der letzten 7 Tage im Vergleich zur Plan-Auslastung"
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+# vom Engine erzeugte Typen und tsconfig je Mod
+mods/*/.claude-plugin/types/
+mods/*/tsconfig.json

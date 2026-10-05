@@ -1,0 +1,7 @@
+{
+  "name": "token-usage",
+  "version": "0.1.0",
+  "description": "Token-Verbrauch der letzten 7 Tage im Vergleich zur Plan-Auslastung (5h- und 7-Tage-Fenster)",
+  "author": { "name": "Benjamin Mueller" },
+  "types": "./types/index.d.ts"
+}
